@@ -1,0 +1,756 @@
+---
+title: "Yeast Proteomics"
+author: "Ashfaq Ali (ashfaq.ali@nbis.se)"
+date: "16/02/2020"
+output:
+  pdf_document: default
+  html_document:
+    self_contained: no
+    keep_md: yes
+header-includes:
+- \usepackage{titling}
+- \pretitle{\begin{center} \includegraphics[width=2in,height=2in]{~/Documents/Projects/Olena_5691/Code/nbislogo-green-txt.jpg}\LARGE\\}
+- \posttitle{\end{center}}
+always_allow_html: yes
+---
+
+\
+
+### Contact:
+
+Olena Ishchuk (ishchuk\@chalmers.se), F. Daviddavidfl\@chalmers.se (PI)
+
+### NBIS Staff
+
+Ashfaq Ali (ashfaq.ali\@nbis.se)
+
+Fredrik Levander (Fredrik.Levander.nbis.se)
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+setwd("/Users/cob-aaf/Documents/Projects/Olena_5691/Code")
+```
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
+suppressMessages(suppressWarnings(library(tidyverse)))
+suppressMessages(suppressWarnings(library(SummarizedExperiment)))
+suppressMessages(suppressWarnings(library(tidySummarizedExperiment)))
+suppressMessages(suppressWarnings(library(limma)))
+suppressMessages(suppressWarnings(library(pheatmap)))
+suppressMessages(suppressWarnings(library("UpSetR")))
+suppressMessages(suppressWarnings(library(ggbiplot)))
+suppressMessages(suppressWarnings(library(msigdbr)))
+suppressMessages(suppressWarnings(library(clusterProfiler)))
+suppressMessages(suppressWarnings(library(biomaRt)))
+suppressMessages(suppressWarnings(library(EnhancedVolcano)))
+
+
+suppressMessages(suppressWarnings(library(NormalyzerDE)))
+
+
+suppressMessages(suppressWarnings(library(styler)))
+suppressMessages(suppressWarnings(library(knitr)))
+suppressMessages(suppressWarnings(library(magrittr)))
+suppressMessages(suppressWarnings(library(plotly)))
+suppressMessages(suppressWarnings(library(ggplot2)))
+suppressMessages(suppressWarnings(library(DT)))
+suppressMessages(suppressWarnings(library(kableExtra)))
+suppressMessages(suppressWarnings(library(bookdown)))
+suppressMessages(suppressWarnings(library(summarytools)))
+suppressMessages(suppressWarnings(library(RColorBrewer)))
+suppressMessages(suppressWarnings(library(openxlsx)))
+suppressMessages(suppressWarnings(library(org.Sc.sgd.db)))
+```
+
+------------------------------------------------------------------------
+
+## Support \# 5691 Verification grant, hemoglobin secretion strain (yeast) proteomics
+
+### Agreed analyses:
+
+\- asses the quality of data obtained
+
+\- estimate statistically significant differences in protein expression between two strains, and
+
+\- visualize the differentially expressed proteins by volcano plot, heat-map, PCA and venn diagram.
+
+\- protein set enrichment analysis, highlight GO terms, processes that differ between strains
+
+\- If time allows, perform Clustering based on differentiated expression to identify protein modules
+
+### Requested Changes
+
+-Could you change the label "fusionhemoglobin sequence" to "FusionHb" in heat maps and volcano plot please?
+
+-Could you add yeast gene names in volcano plot and heat-maps instead of uniport names; will this file be useful for this ("uniport_yeast.csv)? attaching the file here.
+
+-for GO term enrichment I would like to have one big bar chart instead of heatmaps; is it also possible to show up-regulated and down-regulated GO terms in different colors on this bar chart?
+
+### Short Summary
+
+Median normalized TMT based proteomics was provided by the user which first Log 2 transformed and QC was performed by estimating data completeness, PCA and density plots. Differential expression was performed using Limma package in R and Go term enrichment analyses was done using Cluster Profiler Package in R
+
+## Data preparation and QC
+
+Median normalized data provided by Olenawas used in the analyses in the project. In the data preparation and QC, following steps were used.
+
+```{r, echo=FALSE}
+dir.out <- "../results"
+
+Col_Meta <- read.xlsx("../Abundance_Data.xlsx", sheet = 3, rowNames = TRUE, colNames = TRUE) 
+
+Row_Meta <- read.xlsx("../Abundance_Data.xlsx", sheet = 4, rowNames = TRUE, colNames = TRUE)
+
+#Row_Meta$Protein["fusionhemoglobinsequence"] <- 
+
+Data_matrix <- read.xlsx("../Abundance_Data.xlsx", sheet = 2,rowNames = TRUE, colNames = TRUE) 
+
+prot_anno <- read_csv("../uniprot_yeast.csv")
+Data_se <- SummarizedExperiment(assays = list(rawdata =Data_matrix), colData = Col_Meta, rowData = Row_Meta)
+```
+
+### Remove missing data
+
+Missing data where protein abundance information was missing was removed from the data.
+
+```{r, include=FALSE}
+rowData(Data_se)$nas <- rowSums(is.na(assays(Data_se)$rawdata))
+Data_se <- Data_se[rowData(Data_se)$nas<16,]
+
+
+Data_se_tidy <- Data_se %>% tidy()
+
+```
+
+### Plot densities
+
+The density plots of all samples seem to follow very similar distributions, additional normalization is not required for this data.
+
+```{r , echo=FALSE}
+my_theme <-
+    list(
+        scale_fill_brewer(palette="Set1"),
+        scale_color_brewer(palette="Set1"),
+        theme_bw() +
+            theme(
+                panel.border=element_blank(),
+               axis.line=element_line(),
+                panel.grid.major=element_line(size=0.2),
+                panel.grid.minor=element_line(size=0.1),
+                text=element_text(size=12),
+                legend.position="bottom",
+                aspect.ratio=1,
+                strip.background=element_blank(),
+                axis.title.x=element_text(margin=margin(t=10, r=10, b=10, l=10)),
+                axis.title.y=element_text(margin=margin(t=10, r=10, b=10, l=10))
+            )
+    )
+```
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+
+d <-  Data_se_tidy %>% 
+  tidySummarizedExperiment::ggplot(aes(log2(rawdata), group=sample, color=`Strain`)) +
+  geom_density() +
+  scale_x_log10() +
+  my_theme
+# ggsave(d,
+#   file = paste("../results/",
+#     "Densities", ".png",
+#     sep = ""
+#   ),
+#   scale = 2,
+#   units = "cm", height = 15, width = 10
+# )
+
+#d
+ggplotly(d)
+```
+
+### Plot sample overview using PCA
+
+Principle component analyses revealed that the first principle component explains most of the variation in this data set. The samples from the two strains cluster close to each others withing the strain annotation but in distinct groups associated with strain annotation.
+
+```{r echo=FALSE, warning=FALSE, message=FALSE }
+
+pca <- stats::prcomp(t(assays(Data_se)$rawdata))
+
+g <- ggbiplot(pca,
+  obs.scale = 1, var.scale = 1,
+  groups = Data_se$Strain, ellipse = F,
+  circle = TRUE, var.axes = F, labels = Data_se$sample
+) +
+  scale_color_discrete(name = "") +
+  theme(
+    legend.direction = "horizontal",
+    legend.position = "top"
+  ) +
+  theme_bw()
+
+# ggsave(g,
+#   file = paste("../results/",
+#     "PCA_lables", ".png",
+#     sep = ""
+#   ),
+#   scale = 2,
+#   units = "cm", height = 15, width = 10
+# )
+
+ggplotly(g)
+
+```
+
+## Differential expression analyses
+
+For differential expression analyses we used "limma" package in R. Following models were used to analyze deferentially abundant proteins.
+
+-   *Basic model* protein \~ strain
+
+```{r , echo=FALSE}
+Data_se$Strain <- as.factor(Data_se$Strain)
+design <- model.matrix(~ 1 + Data_se$Strain)
+colnames(design) <- c("(Intercept)", "Strain")
+fit <- lmFit(log2(assays(Data_se)$rawdata), design = design)
+
+fit <- eBayes(fit = fit)
+
+strainDE <- topTable(fit, p.value = 0.01, number = Inf, coef = "Strain", )
+dim(strainDE)
+
+strainDE <- topTable(fit, number = Inf, coef = "Strain", sort.by = "P")  %>%
+  rownames_to_column(var = "proteinID") %>%
+  as.data.frame()
+strainDE <- merge(strainDE, (as.data.frame(rowData(Data_se)) %>% rownames_to_column(var = "proteinID")))
+strainDE <- merge(strainDE, (as.data.frame(assays(Data_se)$rawdata) %>% rownames_to_column(var = "proteinID"))) %>% arrange(adj.P.Val)
+strainDE <-  merge(strainDE, prot_anno, by.x = "proteinID", by.y = "Entry", all.x=TRUE)
+
+strainDE[strainDE2$proteinID=="FusionHb",]$Gene.names <- "FusionHb"
+#strainDE$gene <- str_split(strainDE$Protein, pattern = "_", simplify = TRUE)[,1]
+
+writexl::write_xlsx(strainDE, "../results/Proteins_results_annotated_2.xlsx")
+
+```
+
+Sample annotations were as following.
+
+```{r, echo=FALSE}
+colData(Data_se) %>% as.data.frame() %>% datatable(selection = c(1:3))
+```
+
+The differetially abundant proteins are indicated in the table below. Positive logFoldChange indicates over abundance in Strain2 compared with the Strain1.
+
+```{r, warning=FALSE, echo=FALSE}
+options(digits = 2)
+strainDE  %>%  datatable() %>% formatRound(c('logFC', 'AveExpr', 't'), 2) 
+```
+
+### Volcano plots
+
+Volcano plots to visualize the differntially abundant proteins, EnhancedVolcano plots was used.
+
+```{r  echo=FALSE, warning=FALSE, message=FALSE }
+strainDE$proteinID[""]
+ev <- EnhancedVolcano(strainDE,
+lab = strainDE$Gene.names,
+  x = "logFC",
+  y = "adj.P.Val",
+  pCutoff = 0.01,
+  labSize = 2,
+  ylim = c(0, max(-log10(strainDE$adj.P.Val), na.rm = TRUE) + 1),
+  FCcutoff = 0.58 ,
+  xlim = c(min(strainDE$logFC) - 0.01, max(strainDE$logFC) + 0.01), xlab = "Fold change", 
+legendLabels = c("Not significant", "LFC & NS", "adj. P val < 0.01", "adj Pval < 0.01 & Foldchange 1"),
+
+
+
+  # transcriptPointSize = 1.5,
+
+  title = "Differentially abundant proteins",
+  subtitle = "",
+  boxedLabels = FALSE,
+  shadeBins = 4,
+  legendLabSize = 10
+)
+
+
+ggsave("../results//VolcanoAgeingUpdate2.png", width = 7, height = 9)
+ev
+
+
+```
+
+### Heatmap for proteins significantly deferentially abundant.
+
+Heatmap of all proteins with adjusted p value below 0.05.
+
+```{r echo=FALSE, warning=FALSE, message=FALSE }
+strianData <- strainDE %>% filter(adj.P.Val <0.05) 
+
+rownames(strianData) <- make.unique(strianData$Gene.names)
+png("../results/Heatmap_VVlarge2.png", units = "cm", height = 105, width = 30,res = 300)
+pheatmap(strianData[, colnames(Data_se)], display_numbers=FALSE, fontsize=7, cluster_cols=TRUE, cluster_rows = TRUE,  scale = "row")
+dev.off()
+
+
+```
+
+Heatmap of all proteins with adjusted p value below 0.05 and log2Foldchange of 0.58 corresponding 1.5 foldchange.
+
+```{r echo=FALSE, warning=FALSE, message=FALSE }
+strianData2 <- strainDE %>% filter(adj.P.Val <0.05 & abs(logFC) >0.58) 
+rownames(strianData2) <- strianData2$Gene.names
+png("../results/Heatmap_0.58_2.png", units = "cm", height = 35, width = 30,res = 300)
+pheatmap(strianData2[, colnames(Data_se)], display_numbers=FALSE, fontsize=7, cluster_cols=TRUE, cluster_rows = TRUE,  scale = "row")
+dev.off()
+
+
+```
+
+## GO term enrichment analyses
+
+GO term enrichment analyses was performed by using "AnnotationHub" database for yeast genome "org.Sc.sgd.db" from the R Bioconductor package. For enrichment gseGO function from the R package ClusterProfiler was used.
+
+```{r , echo=FALSE}
+#bg <- mapIds(org.Hs.eg.db, keys=proteins, column= "ENTREZID", keytype='UNIPROT', 
+ #   multiVals=first)
+#strianData$gene <- str_split(strianData$Protein, pattern = "_", simplify = TRUE)[,1]
+
+#Ageing_Patways <- list()
+W2 <-strainDE$logFC
+names(W2)<- strainDE$proteinID
+W2<- sort((W2), decreasing = TRUE) 
+W2 <- W2[!duplicated(names(W2))]
+#mutate(rank = rank(log2FoldChange,  ties.method = "random"))
+```
+
+### Cellular Component
+
+For Cellular component minGSSize = 10, maxGSSize = 500 and pvalueCutoff = 0.01 were used.
+
+```{r }
+egoCC <- gseGO(geneList     = W2, keyType = "UNIPROT",
+              OrgDb        = org.Sc.sgd.db,
+              ont          = "CC",
+              #nPerm        = 1000,
+              minGSSize    = 10,
+              maxGSSize    = 500,
+              pvalueCutoff = 0.01,
+              verbose      = FALSE,eps = 0
+      
+                )
+
+egoCC %>% as.data.frame() %>% datatable(selection = c(1:10)) %>% formatRound(c("enrichmentScore", "NES" ), 2) 
+
+```
+
+```{r}
+h1 <-heatplot(egoCC, foldChange = W2, showCategory = 15)
+ggsave("../results/GoCC.png", width = 35, height = 6)
+ggplotly(h1, width =8, height = 6)
+```
+
+### Enriched GO terms **Biological process**
+
+For **Biological process** minGSSize = 10, maxGSSize = 500 and pvalueCutoff = 0.01 were used.
+
+```{r}
+egoBP <- gseGO(geneList     = W2, keyType = "UNIPROT",
+              OrgDb        = org.Sc.sgd.db,
+              ont          = "BP",
+              #nPerm        = 1000,
+              minGSSize    = 10,
+              maxGSSize    = 500,
+              pvalueCutoff = 0.01,
+              verbose      = FALSE,eps = 0
+              )
+
+egoBP %>% as.data.frame() %>% datatable(selection = c(1:10)) %>% formatRound(c("enrichmentScore", "NES" ), 2) 
+```
+
+```{r, fig.width=12}
+h2 <-heatplot(egoBP, foldChange = W2, showCategory = 10)
+
+ggsave("../results/GoBP.png", width = 35, height = 6)
+ggplotly(h2, width =8, height = 6)
+
+```
+
+### Enriched GO terms **Molecular Function**
+
+For **Molecular Function** minGSSize = 10, maxGSSize = 500 and pvalueCutoff = 0.01 were used.
+
+```{r}
+egoMF <- gseGO(geneList     = W2, keyType = "UNIPROT",
+              OrgDb        = org.Sc.sgd.db,
+              ont          = "MF",
+              #nPerm        = 1000,
+              minGSSize    = 3,
+              maxGSSize    = 500,
+              pvalueCutoff = 0.01,
+              verbose      = FALSE,eps = 0
+              )
+
+
+egoMF %>% as.data.frame %>% datatable(selection = c(1:10)) %>% formatRound(c("enrichmentScore", "NES" ), 2) 
+```
+
+```{r}
+egoMF <- egoMF %>% as.data.frame()%>% as.data.frame() %>% tibble() %>% mutate(enrichment= ifelse(NES > 0, "Up-regulated", "Down-regulated")) 
+
+```
+
+```{r}
+egoBP <- egoBP %>% as.data.frame()%>% as.data.frame() %>% tibble() %>% mutate(enrichment= ifelse(NES > 0, "Up-regulated", "Down-regulated")) 
+egoCC <- egoCC %>% as.data.frame()%>% as.data.frame() %>% tibble() %>% mutate(enrichment= ifelse(NES > 0, "Up-regulated", "Down-regulated")) 
+```
+
+```{r}
+h3 <-heatplot(egoMF, foldChange = W2, showCategory = 15)
+ggsave("../results/GoMF.png", width = 35, height = 6)
+ggplotly(h3, width =8, height = 6)
+```
+
+```{r}
+g = ggplot(egoMF, aes(reorder(Description, NES), NES)) +
+  geom_segment( aes(reorder(Description, NES), xend=Description, y=0, yend=NES)) +
+  geom_point( size=5, aes( fill = enrichment),
+              shape=21, stroke=2) +
+    scale_fill_manual(values = c("Down-regulated" = "dodgerblue",
+                      "Up-regulated" = "firebrick") ) +
+    coord_flip() +
+    labs(x="GO term", y="Normalized Enrichment Score",
+         title="GO Molecula Function") + 
+    theme_minimal()
+g1 = ggplot(egoBP, aes(reorder(Description, NES), NES)) +
+  geom_segment( aes(reorder(Description, NES), xend=Description, y=0, yend=NES)) +
+  geom_point( size=5, aes( fill = enrichment),
+              shape=21, stroke=2) +
+    scale_fill_manual(values = c("Down-regulated" = "dodgerblue",
+                      "Up-regulated" = "firebrick") ) +
+    coord_flip() +
+    labs(x="GO term", y="Normalized Enrichment Score",
+         title="GO - Biological Process") + 
+    theme_minimal()
+
+g2 = ggplot(egoCC, aes(reorder(Description, NES), NES)) +
+  geom_segment( aes(reorder(Description, NES), xend=Description, y=0, yend=NES)) +
+  geom_point( size=5, aes( fill = enrichment),
+              shape=21, stroke=2) +
+    scale_fill_manual(values = c("Down-regulated" = "dodgerblue",
+                      "Up-regulated" = "firebrick") ) +
+    coord_flip() +
+    labs(x="GO term", y="Normalized Enrichment Score",
+         title="GO - Cellular Comonent") + 
+    theme_minimal()
+
+egoBP2 = egoBP %>% arrange(pvalue) %>% group_by(enrichment) %>% slice(1:10)
+
+g3 = ggplot(egoBP2, aes(reorder(Description, NES), NES)) +
+  geom_segment( aes(reorder(Description, NES), xend=Description, y=0, yend=NES)) +
+  geom_point( size=5, aes( fill = enrichment),
+              shape=21, stroke=2) +
+    scale_fill_manual(values = c("Down-regulated" = "dodgerblue",
+                      "Up-regulated" = "firebrick") ) +
+    coord_flip() +
+    labs(x="GO term", y="Normalized Enrichment Score",
+         title="Top GO - Biological Process") + 
+    theme_minimal()
+
+
+png(file.path("../results/", paste0("GO_MF",  ".png")),  width = 3600, height = 1800, units = "px", res =300)
+g
+dev.off()
+png(file.path("../results/", paste0("GO_BP",".png")),  width = 3600, height = 1800, units = "px", res =300)
+g1
+dev.off()
+
+png(file.path("../results/", paste0("GO_CC",".png")),  width = 3600, height = 1800, units = "px", res =300)
+g2
+dev.off()
+
+png(file.path("../results/", paste0("GO_BP_Top", ".png")),  width = 3600, height = 1800, units = "px", res =300)
+g3
+dev.off()
+```
+
+```{r}
+goterms <- list(CellularComponent = egoCC, BiologicalProcess = egoBP, MolecularFunction =egoMF )
+write.xlsx(goterms, "../results/GoTerms.xlsx")
+#cowplot::plot_grid(h1, h2, h3, ncol=1, labels=LETTERS[1:3])
+```
+
+```{r}
+egoMF2 <- egoMF %>% 
+    mutate(gene = strsplit(as.character(core_enrichment), "/")) %>% 
+    unnest(gene)
+
+genes_up <- strainDE %>% filter(logFC > 0 & adj.P.Val < 0.05)
+gene_down <- strainDE %>% filter(logFC < 0 & adj.P.Val < 0.05)
+
+egoMF2 <- egoMF2 %>% mutate(
+                gene_dir = ifelse(
+                    gene %in% genes_up$proteinID, "up", "down"
+                    )
+                )
+```
+
+```{r}
+egoCC2 <- egoCC %>% 
+    mutate(gene = strsplit(as.character(core_enrichment), "/")) %>% 
+    unnest(gene)
+
+genes_up <- strainDE %>% filter(logFC > 0 & adj.P.Val < 0.05)
+gene_down <- strainDE %>% filter(logFC < 0 & adj.P.Val < 0.05)
+
+egoCC2 <- egoCC2 %>% group_by(Description) %>%  mutate(
+                gene_dir = case_when(
+                    gene %in% filter(genes_up,
+                     adj.P.Val < 0.05 & adj.P.Val > 0.01)$proteinID ~  "up > 0.01",
+                    gene %in% filter(genes_up,
+                     adj.P.Val < 0.01 )$proteinID ~  "up < 0.01",
+                    gene %in% filter(gene_down,
+                     adj.P.Val < 0.05 & adj.P.Val > 0.01)$proteinID ~  "down > 0.01",
+                    gene %in% filter(gene_down,
+                     adj.P.Val < 0.01 )$proteinID ~  "down < 0.01"
+                    )
+                ) %>% ungroup()
+
+egoCC2 <- egoCC2 %>% drop_na(gene_dir)
+
+egoCC3 <- egoCC2 %>% group_by(Description, gene_dir) %>% summarise(n = n()) %>% mutate(freq = n / sum(n)) %>%  ungroup()
+
+egoCC3 <-egoCC3 %>% mutate(perc = round(perc = (n/sum(n)*100) )
+```
+
+```{r}
+egoBP2 <- egoBP %>% 
+    mutate(gene = strsplit(as.character(core_enrichment), "/")) %>% 
+    unnest(gene)
+
+genes_up <- strainDE %>% filter(logFC > 0 & adj.P.Val < 0.05)
+gene_down <- strainDE %>% filter(logFC < 0 & adj.P.Val < 0.05)
+
+egoBP2 <- egoBP2 %>% group_by(Description) %>%  mutate(
+                gene_dir = case_when(
+                    gene %in% filter(genes_up,
+                     adj.P.Val < 0.05 & adj.P.Val > 0.01)$proteinID ~  "up > 0.01",
+                    gene %in% filter(genes_up,
+                     adj.P.Val < 0.01 )$proteinID ~  "up < 0.01",
+                    gene %in% filter(gene_down,
+                     adj.P.Val < 0.05 & adj.P.Val > 0.01)$proteinID ~  "down > 0.01",
+                    gene %in% filter(gene_down,
+                     adj.P.Val < 0.01 )$proteinID ~  "down < 0.01"
+                    )
+                ) %>% ungroup()
+
+egoBP2 <- egoBP2 %>% drop_na(gene_dir)
+
+egoBP3 <- egoBP2 %>% group_by(Description, gene_dir) %>% summarise(n = n()) %>% mutate(freq = n / sum(n)) %>%  ungroup()
+
+#egoBP3 <-egoBP3 %>% mutate(perc = round(perc = (n/sum(n)*100) )
+```
+
+```{r}
+p3 <- ggplot(egoBP3, aes(x = Description , y = freq, fill = gene_dir)) + 
+    geom_bar(stat = 'identity') + 
+    ggtitle('GO terms Biological Process') + 
+    xlab('Enriched GO Term') + 
+    ylab('Percentage of regulated protein') + 
+    coord_flip() + 
+    labs(fill = "Direction") +
+    theme_minimal()
+ggsave(p3,
+  file = paste("../results/",
+    "GoTermsBarPercentagBP", ".png",
+    sep = ""
+  ),
+  scale = 2,
+  units = "cm", height = 15, width = 16
+)
+```
+
+```{r}
+p4 <- ggplot(egoBP3, aes(x = Description , y = n, fill = gene_dir)) + 
+    geom_bar(stat = 'identity') + 
+    ggtitle('GO terms Biological Process') + 
+    xlab('Enriched GO term') + 
+    ylab('Number of regulated protein') + 
+    coord_flip() + 
+    labs(fill = "Direction") +
+    theme_minimal()
+ggsave(p4,
+  file = paste("../results/",
+    "GoTermsBarNumberBP", ".png",
+    sep = ""
+  ),
+  scale = 2,
+  units = "cm", height = 15, width = 16
+)
+```
+
+### Kegg pathways
+
+For enrichment gseGO function from the R package ClusterProfiler was used. For set size minGSSize = 10 and pvalueCutoff = 0.05 were used.
+
+```{r , warning=FALSE}
+kk2 <- gseKEGG(geneList     = W2, keyType = "uniprot",
+               organism     = 'sce',
+              # nPerm        = 1000,
+               minGSSize    = 10,
+               pvalueCutoff = 0.05,
+               verbose      = FALSE)
+
+write.xlsx(kk2, "../results/KeggPatways.xlsx")
+kk2
+
+
+
+```
+
+## Suggestions
+
+User is further recommended to use OmicsLoop (<https://www.biorxiv.org/content/10.1101/2020.10.22.349944v1>) for exploration of results.
+
+## Gene set enrichment analyses using MSigDb
+
+### Load gene sets
+
+```{r eval=FALSE, include=FALSE, message=FALSE, warning=FALSE}
+
+
+m_df <- msigdbr(species = "Saccharomyces cerevisiae")
+#hm_gsig <-m_df %>% filter(gs_cat=="H") %>% dplyr::select(gs_name, gene_symbol) # Hallmark genesets
+C5_gsig <-m_df %>% filter(gs_cat=="C5") %>% dplyr::select(gs_name, gene_symbol) # Go terms mouse
+C2_gsig <-m_df %>% filter(gs_cat=="C2" & gs_subcat == "CP:KEGG") %>% dplyr::select(gs_name, gene_symbol) # Curated gene sets (Kegg pathways)
+#C3_gsig <-m_df %>% filter(gs_cat=="C3" & gs_subcat == "TFT:GTRD") %>% dplyr::select(gs_name, gene_symbol) # Motifs (Trancription factor targets)
+#C7_gsig <-m_df %>% filter(gs_cat=="C7") %>% dplyr::select(gs_name, gene_symbol) # C7 (immunologic signatures, 4872 gene sets)
+
+```
+
+### Gene Set Enrichment analyses
+
+```{r eval=FALSE, include=FALSE}
+# strianData$gene <- str_split(strianData$Protein, pattern = "_", simplify = TRUE)[,1] ## Extract gene IDs
+# colnames(strianData)[1]<- "UNIPROT"
+# colnames(strainDE)[1]<- "UNIPROT"
+# ## Find entrez IDs
+# gene.df2 <- bitr( strainDE$UNIPROT, fromType = "UNIPROT",      
+#                   toType = c("ENTREZID", "GENENAME"),
+#                   OrgDb = org.Sc.sgd.db)
+# 
+# strainDE <- join(strainDE, gene.df2, by = "UNIPROT")
+# 
+# strianData <- join(strianData, gene.df2, by = "UNIPROT")
+# 
+# 
+# sigGenes <- strianData$gene # create gene set with gene symbole
+# 
+# sigProteins <- strianData$UNIPROT # create gene set with UNIPROT IDs
+# sigGenesEntrezt <- strianData$ENTREZID
+# ## Create ordered gene list
+# geneList <- strianData$logFC
+# names(geneList)<- strianData$gene
+# geneList <- sort((geneList), decreasing = TRUE) 
+# geneList <- geneList[!duplicated(names(geneList))]
+# ## Create ordered gene list with protein IDs
+# 
+# proteinList <- strianData$logFC
+# names(proteinList)<- strianData$gene
+# proteinList <- sort((proteinList), decreasing = TRUE) 
+# proteinList <- proteinList[!duplicated(names(proteinList))]
+# ## Create gene list with Entrez IDs 
+# entreList <- strianData$logFC
+# names(entreList)<- strianData$ENTREZID
+# entreList <- sort((entreList), decreasing = TRUE) 
+# entreList <- entreList[!duplicated(names(entreList))]
+```
+
+```{r eval=FALSE, include=FALSE}
+#Ageing_Patways <- list()
+# W1 <-strianData$logFC
+# names(W1)<- strianData$gene
+# W1 <- sort((W1), decreasing = TRUE) 
+# W1 <- W1[!duplicated(names(W1))]
+# #mutate(rank = rank(log2FoldChange,  ties.method = "random")) 
+
+
+enriched <- list()
+
+enriched$kegg <-GSEA(geneList = geneList, TERM2GENE = C2_gsig, exponent = 1, 
+                        #nPerm = 10000, 
+             pvalueCutoff = 1, minGSSize = 3, maxGSSize = 600,  verbose = FALSE, by="fgsea", eps = 0) %>% as.data.frame() %>% tibble() %>% mutate(enrichment= ifelse(NES > 0, "Up-regulated", "Down-regulated"), Description = stringr::str_replace_all(ID, c("KEGG_"= "", "_"=" ")))
+
+
+enriched$GO <-GSEA(geneList, TERM2GENE = C5_gsig, exponent = 1, 
+                      #nPerm = 10000,  
+                      pvalueCutoff = 1, minGSSize = 3, maxGSSize = 600,  verbose = FALSE, by="fgsea", eps = 0) %>% as.data.frame() %>% tibble() %>% mutate(enrichment= ifelse(NES > 0, "Up-regulated", "Down-regulated"), Description = stringr::str_replace_all(ID, c("GO_"= "", "_"=" ")))
+
+
+enriched$GO22 <- GSEA(geneList, TERM2GENE = C5_gsig, exponent = 1, 
+                      #nPerm = 10000,  
+                      pvalueCutoff = 1, minGSSize = 3, maxGSSize = 600,  verbose = FALSE, by="fgsea", eps = 0)
+# writexl::write_xlsx(Ageing_Patways, "../Results/Gene_sets.xlsx")
+
+h <-heatplot(enriched$GO22, foldChange = W1)
+ggplotly(h)  
+```
+
+```{r eval=FALSE, include=FALSE}
+strianData$gene <- str_split(strianData$Protein, pattern = "_", simplify = TRUE)[,1]
+
+#Ageing_Patways <- list()
+W2 <-strainDE$logFC
+names(W2)<- strainDE$gene
+W2<- sort((W2), decreasing = TRUE) 
+W2 <- W2[!duplicated(names(W2))]
+#mutate(rank = rank(log2FoldChange,  ties.method = "random")) 
+
+
+#enriched <- list()
+
+enriched$kegg2 <-GSEA(W2, TERM2GENE = C2_gsig, exponent = 1, 
+                        #nPerm = 10000, 
+             pvalueCutoff = 1, minGSSize = 3, maxGSSize = 600,  verbose = FALSE, by="fgsea", eps = 0) %>% as.data.frame() %>% tibble() %>% mutate(enrichment= ifelse(NES > 0, "Up-regulated", "Down-regulated"), Description = stringr::str_replace_all(ID, c("KEGG_"= "", "_"=" ")))
+
+
+enriched$GO2 <-GSEA(W2, TERM2GENE = C5_gsig, exponent = 1, 
+                      #nPerm = 10000,  
+                      pvalueCutoff = 1, minGSSize = 3, maxGSSize = 600,  verbose = FALSE, by="fgsea", eps = 0) %>% as.data.frame() %>% tibble() %>% mutate(enrichment= ifelse(NES > 0, "Up-regulated", "Down-regulated"), Description = stringr::str_replace_all(ID, c("GO_"= "", "_"=" ")))
+enriched$GO22 <-GSEA(W2, TERM2GENE = C5_gsig, exponent = 1, 
+                      #nPerm = 10000,  
+                      pvalueCutoff = 1, minGSSize = 3, maxGSSize = 600,  verbose = FALSE, by="fgsea", eps = 0)
+```
+
+# References
+
+```{r}
+citation(package = "limma")
+knitr::write_bib(c("limma", "EnhancedVolcano", "clusterProfiler"), "../results//References.bib")
+
+```
+
+# Acknowledgments
+
+## Data responsibility
+
+*NBIS & Uppnex Unfortunately, we do not have resources to keep any files associated with the support request. We suggest that you safely store the results delivered by us. In addition, we ask that you remove the files from UPPMAX/UPPNEX after analysis is completed. The main storage at UPPNEX is optimized for high-speed and parallel access, which makes it expensive and not the right place for long time archiving.*
+
+*Long-term backup The responsibility for data archiving lies with universities and we recommend asking your local IT for support with long-term data archiving. Also a newly established Data Office at SciLifeLab may be of help to discuss other options.*
+
+## Acknowledgments
+
+If you are presenting the results in a paper, at a workshop or conference, we kindly ask you to acknowledge us. NBIS Staff are encouraged to be co-authors when this is merited in accordance to the ethical recommendations for authorship, e.g. ICMJE recommendations.If applicable, please include Ashfaq, Ali, National Bioinformatics Infrastructure Sweden, Science for Life Laboratory, Department of Immunotechnology, Lund University . In other cases, NBIS would be grateful if support by us is acknowledged in publications according to this example: "Support by NBIS (National Bioinformatics Infrastructure Sweden) is gratefully acknowledged"
+
+NGI In publications based on data from NGI Sweden, the authors must acknowledge SciLifeLab, NGI and UPPMAX: "The authors would like to acknowledge support from Science for Life Laboratory, the National Genomics Infrastructure, NGI, and Uppmax for providing assistance in massive parallel sequencing and computational infrastructure."
+
+## Support project closing procedures
+
+Once the final report is delivered, you should be contacted by one of our managers, Jessica Lindvall jessica.lindvall\@nbis.se or Henrik Lantz henrik.lantz\@nbis.se, with a request to close down the project in our internal system and for invoicing matters. If we do not hear from you within 30 days the project will be automatically closed and invoice sent. Again, we would like to remind you about data responsibility and acknowledgements, see Data Responsibility and Acknowledgments sections.
+
+You are naturally more than welcome to come back to us with further data analysis request at any time via <http://nbis.se/support/support.html.>
+
+Thank you for using NBIS and all the best for future research.
+
+```{r}
+sessionInfo()
+```
